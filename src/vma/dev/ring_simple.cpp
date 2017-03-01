@@ -418,7 +418,7 @@ bool ring_simple::attach_flow(flow_tuple& flow_spec_5t, pkt_rcvr_sink *sink)
 				l2_mc_ip_filter = new rfs_rule_filter(m_l2_mc_ip_attach_map, key_udp_mc.dst_ip, flow_spec_5t);
 			}
 			try {
-				p_tmp_rfs = new rfs_mc(&flow_spec_5t, this, l2_mc_ip_filter);
+				p_tmp_rfs = new rfs_mc(&flow_spec_5t, this, l2_mc_ip_filter, flow_tag_id);
 			} catch(vma_exception& e) {
 				ring_logerr("%s", e.message);
 				return false;
@@ -808,7 +808,6 @@ inline void ring_simple::vma_poll_process_recv_buffer(mem_buf_desc_t* p_rx_wc_bu
 				p_rx_wc_buf_desc->rx.src.sin_port        = p_udp_h->source;
 				p_rx_wc_buf_desc->rx.dst.sin_port        = p_udp_h->dest;
 				p_rx_wc_buf_desc->rx.sz_payload          = sz_payload;
-//				p_rx_wc_buf_desc->transport_header_len   = transport_header_len;
 
 				// Update the L3 info
 				p_rx_wc_buf_desc->rx.src.sin_family      = AF_INET;
