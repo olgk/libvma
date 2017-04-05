@@ -35,10 +35,6 @@
 #define CQ_MGR_H
 
 #include "utils/atomic.h"
-#if 0
-REVIEW
-#include <map> probably replaced by atomic.h
-#endif
 #include "vma/util/sys_vars.h"
 #include "vma/util/verbs_extra.h"
 #include "vma/util/hash_map.h"
@@ -60,6 +56,7 @@ REVIEW
 class net_device_mgr;
 class ring;
 class qp_mgr;
+class qp_mgr_eth_mlx5;
 class ring_simple;
 
 #define LOCAL_IF_INFO_INVALID (local_if_info_t){0,0}
@@ -147,7 +144,7 @@ public:
 	volatile struct mlx5_cqe64 *mlx5_check_error_completion(volatile struct mlx5_cqe64 *cqe, volatile uint16_t *ci, uint8_t op_own);
 	inline void mlx5_cqe64_to_vma_wc(volatile struct mlx5_cqe64 *cqe, vma_ibv_wc *wce);
 	int mlx5_poll_and_process_error_element_rx(volatile struct mlx5_cqe64 *cqe, void* pv_fd_ready_array);
-	int mlx5_poll_and_process_error_element_tx(volatile struct mlx5_cqe64 *cqe, uint64_t* p_cq_poll_sn);
+	virtual int mlx5_poll_and_process_error_element_tx(volatile struct mlx5_cqe64 *cqe, uint64_t* p_cq_poll_sn);
 #endif // DEFINED_VMAPOLL	
 
 	/**
@@ -157,8 +154,8 @@ public:
 	 * @return >=0 number of wce processed
 	 *         < 0 error
 	 */
-	int	poll_and_process_element_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array = NULL);
-	int	poll_and_process_element_tx(uint64_t* p_cq_poll_sn);
+	virtual int	poll_and_process_element_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array = NULL);
+	virtual int	poll_and_process_element_tx(uint64_t* p_cq_poll_sn);
 
 	/**
 	 * This will check if the cq was drained, and if it wasn't it will drain it.
@@ -177,7 +174,15 @@ public:
 	virtual void	add_qp_rx(qp_mgr* qp);
 	virtual void	del_qp_rx(qp_mgr *qp);
 	
-	void 	add_qp_tx(qp_mgr* qp);
+	virtual void 	add_qp_tx(qp_mgr* qp)
+	{
+		//Assume locked!
+	#ifdef DEFINED_VMAPOLL
+		m_qp = qp;
+	#endif // DEFINED_VMAPOLL
+		m_qp_rec.qp = qp;
+		m_qp_rec.debth = 0;
+	}
 
 	bool	reclaim_recv_buffers(descq_t *rx_reuse);
 	bool	reclaim_recv_buffers_no_lock(descq_t *rx_reuse);
@@ -192,9 +197,6 @@ public:
 	void 	modify_cq_moderation(uint32_t period, uint32_t count);
 
 	inline void convert_hw_time_to_system_time(uint64_t hwtime, struct timespec* systime) { m_p_ib_ctx_handler->convert_hw_time_to_system_time(hwtime, systime); }
-#ifdef DEFINED_VMAPOLL
-	void 	mlx5_init_cq();
-#endif // DEFINED_VMAPOLL	
 
 private:
 #ifdef DEFINED_VMAPOLL
@@ -221,7 +223,7 @@ private:
 	const uint32_t			m_n_sysvar_rx_num_wr_to_post_recv;
 	const uint32_t			m_n_sysvar_cq_poll_batch_max;
 	const uint32_t			m_n_sysvar_qp_compensation_level;
-	const bool				m_b_sysvar_cq_keep_qp_full;
+	const bool			m_b_sysvar_cq_keep_qp_full;
 	const uint32_t			m_n_sysvar_progress_engine_wce_max;
 	qp_rec				m_qp_rec;
 
@@ -247,7 +249,7 @@ private:
 	 * @p_cq_poll_sn global unique wce id that maps last wce polled
 	 * @return Number of successfully polled wce
 	 */
-	virtual int		poll(vma_ibv_wc* p_wce, int num_entries, uint64_t* p_cq_poll_sn);
+	virtual int	poll(vma_ibv_wc* p_wce, int num_entries, uint64_t* p_cq_poll_sn);
 
 	/* Process a WCE... meaning...
 	 * - extract the mem_buf_desc from the wce.wr_id and then loop on all linked mem_buf_desc
@@ -262,10 +264,7 @@ private:
 	 */
 	//a sub helper for poll_and_process_helper_rx in order to shorten the function
 	void		handle_tcp_ctl_packets(uint32_t rx_processed, void* pv_fd_ready_array);
-#ifdef DEFINED_VMAPOLL	
-	int		vma_poll_and_process_element_rx(mem_buf_desc_t **p_desc_lst);
-#endif // DEFINED_VMAPOLL	
-	virtual int		poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array = NULL);
+	virtual int	poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array = NULL);
 	int		poll_and_process_helper_tx(uint64_t* p_cq_poll_sn);
 
 	inline void	compensate_qp_poll_failed();
@@ -312,25 +311,111 @@ public:
 	cq_mgr_mlx5(ring_simple* p_ring, ib_ctx_handler* p_ib_ctx_handler, uint32_t cq_size, struct ibv_comp_channel* p_comp_event_channel, bool is_rx);
 	virtual ~cq_mgr_mlx5();
 
-	virtual inline mem_buf_desc_t*		poll(uint32_t&	opcode, uint32_t&	status);
-	inline volatile struct mlx5_cqe64*	check_cqe(void);
-	volatile struct mlx5_cqe64*			check_error_completion(uint8_t op_own);
-	inline void							cqe64_to_mem_buff_desc(volatile struct mlx5_cqe64 *cqe, mem_buf_desc_t* p_rx_wc_buf_desc, uint32_t& opcode, uint32_t& status);
+#ifdef DEFINED_VMAPOLL	
+	virtual inline int vma_poll_and_process_element_rx(mem_buf_desc_t **p_desc_lst)
+	{
+		return cq_mgr::vma_poll_and_process_element_rx(p_desc_lst);
+	}
+#endif // DEFINED_VMAPOLL
+	inline int poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array = NULL);
+	inline int poll_and_process_helper_tx(uint64_t* p_cq_poll_sn);
 
-	virtual int							drain_and_proccess(uintptr_t* p_recycle_buffers_last_wr_id = NULL);
-	virtual int							poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array = NULL);
-	virtual mem_buf_desc_t*				process_cq_element_rx(mem_buf_desc_t* p_mem_buf_desc, uint32_t& opcode, uint32_t& status);
-	virtual void						add_qp_rx(qp_mgr* qp);
-	virtual void						del_qp_rx(qp_mgr *qp);
+	virtual inline mem_buf_desc_t*		poll(uint32_t&	opcode, uint32_t& status);
+	inline void				cqe64_to_mem_buff_desc(volatile struct mlx5_cqe64 *cqe, mem_buf_desc_t* p_rx_wc_buf_desc, uint32_t& opcode, uint32_t& status);
 
+	virtual int			drain_and_proccess(uintptr_t* p_recycle_buffers_last_wr_id = NULL);
+	virtual mem_buf_desc_t*		process_cq_element_rx(mem_buf_desc_t* p_mem_buf_desc, uint32_t& opcode, uint32_t& status);
+	virtual void			add_qp_rx(qp_mgr* qp);
+	virtual void			del_qp_rx(qp_mgr *qp);
+
+	virtual void 	add_qp_tx(qp_mgr_eth_mlx5* qp)
+	{
+		//Assume locked!
+		m_qp = qp;
+	}
 private:
-	uint32_t					m_cq_size;
-	uint32_t					m_cq_cons_index;
+	qp_mgr_eth_mlx5*		m_qp;
 	volatile struct mlx5_cqe64	(*m_cqes)[];
-	volatile uint32_t			*m_cq_dbell;
-	mem_buf_desc_t				*m_rx_hot_buffer;
+	volatile uint32_t		*m_cq_dbell;
+	mem_buf_desc_t			*m_rx_hot_buffer;
 	volatile struct mlx5_wq		*m_rq;
-	uint64_t					*m_p_rq_wqe_idx_to_wrid;
+	uint64_t			*m_p_rq_wqe_idx_to_wrid;
+	uint32_t			m_cq_size;
+	uint32_t			m_cq_cons_index;
+
+	inline volatile struct mlx5_cqe64*	check_cqe(void);
+	volatile struct mlx5_cqe64*		check_error_completion(uint8_t op_own);
+	inline volatile struct mlx5_cqe64*	check_error_completion(volatile struct mlx5_cqe64 *cqe,
+								       volatile uint32_t *ci, uint8_t op_own)
+	{
+		switch (op_own >> 4) {
+			case MLX5_CQE_INVALID:
+				return NULL; /* No CQE */
+			case MLX5_CQE_REQ_ERR:
+			case MLX5_CQE_RESP_ERR:
+				++(*ci);
+				wmb();
+				*m_cq_dbell = htonl(m_cq_cons_index);
+				return cqe;
+			default:
+				return NULL;
+		}
+	}
+
+	inline volatile struct mlx5_cqe64 *get_cqe64(volatile struct mlx5_cqe64 **cqe_err)
+	{
+		volatile struct mlx5_cqe64 *cqes = *m_cqes;
+		volatile struct mlx5_cqe64 *cqe = &cqes[m_cq_cons_index & (m_cq_size - 1)];
+		uint8_t op_own = cqe->op_own;
+
+		*cqe_err = NULL;
+		if (unlikely((op_own & MLX5_CQE_OWNER_MASK) == !(m_cq_cons_index & m_cq_size))) {
+			return NULL;
+		} else if (unlikely(op_own & 0x80)) {
+			*cqe_err = check_error_completion(cqe, &m_cq_cons_index, op_own);
+			return NULL;
+		}
+
+		++m_cq_cons_index;
+		wmb();
+		*m_cq_dbell = htonl(m_cq_cons_index);
+
+		return cqe;
+	}
+
+	inline void cqe64_to_vma_wc(volatile struct mlx5_cqe64 *cqe, vma_ibv_wc *wc)
+	{
+		struct mlx5_err_cqe *ecqe;
+		ecqe = (struct mlx5_err_cqe *)cqe;
+
+		switch (cqe->op_own >> 4) {
+		case MLX5_CQE_RESP_WR_IMM:
+			break;
+		case MLX5_CQE_RESP_SEND:
+		case MLX5_CQE_RESP_SEND_IMM:
+		case MLX5_CQE_RESP_SEND_INV:
+			vma_wc_opcode(*wc) = VMA_IBV_WC_RECV;
+			wc->byte_len = ntohl(cqe->byte_cnt);
+		case MLX5_CQE_REQ:
+			wc->status = IBV_WC_SUCCESS;
+			return;
+		default:
+			break;
+		}
+
+		/* Only IBV_WC_WR_FLUSH_ERR is used in code */
+		if (MLX5_CQE_SYNDROME_WR_FLUSH_ERR == ecqe->syndrome) {
+			wc->status = IBV_WC_WR_FLUSH_ERR;
+		} else {
+			wc->status = IBV_WC_GENERAL_ERR;
+		}
+
+		wc->vendor_err = ecqe->vendor_err_synd;
+	}
+
+
+
+	int poll_and_process_error_element_tx(volatile struct mlx5_cqe64 *cqe, uint64_t* p_cq_poll_sn);
 };
 #endif
 

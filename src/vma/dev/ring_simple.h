@@ -89,6 +89,7 @@ public:
 	friend class cq_mgr;
 	friend class cq_mgr_mlx5;
 	friend class qp_mgr;
+	friend class qp_mgr_eth_mlx5;
 	friend class rfs;
 	friend class rfs_uc;
 	friend class rfs_uc_tcp_gro;

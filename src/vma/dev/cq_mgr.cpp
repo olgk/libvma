@@ -231,7 +231,6 @@ cq_mgr::cq_mgr(ring_simple* p_ring, ib_ctx_handler* p_ib_ctx_handler, int cq_siz
 	struct ibv_cq *ibcq = m_p_ibv_cq;
 	m_mlx5_cq = _to_mxxx(cq, cq);
 	m_cq_db = m_mlx5_cq->dbrec;
-	m_mlx5_cqes = (volatile struct mlx5_cqe64 (*)[])(uintptr_t)m_mlx5_cq->active_buf->buf;
 #endif
 
 	m_b_is_rx_hw_csum_on = false;
@@ -378,16 +377,6 @@ void cq_mgr::del_qp_rx(qp_mgr *qp)
 	memset(&m_qp_rec, 0, sizeof(m_qp_rec));
 }
 
-void cq_mgr::add_qp_tx(qp_mgr* qp)
-{
-	//Assume locked!
-	cq_logdbg("qp_mgr=%p", qp);
-#ifdef DEFINED_VMAPOLL
-	m_qp = qp;
-#endif // DEFINED_VMAPOLL	
-	m_qp_rec.qp = qp;
-	m_qp_rec.debth = 0;
-}
 
 bool cq_mgr::request_more_buffers()
 {
@@ -896,12 +885,11 @@ int cq_mgr::vma_poll_and_process_element_rx(mem_buf_desc_t **p_desc_lst)
 }
 #endif // DEFINED_VMAPOLL
 
-int cq_mgr::poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array)
+int cq_mgr_mlx5::poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array)
 {
 	// Assume locked!!!
 	cq_logfuncall("");
 
-#ifdef DEFINED_VMAPOLL
 	NOT_IN_USE(p_cq_poll_sn);
 	
 	/* coverity[stack_use_local_overflow] */
@@ -949,7 +937,10 @@ int cq_mgr::poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready
 	}
 	
 	return ret_rx_processed;		
-#else	
+}
+
+int cq_mgr::poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array)
+{
 	/* coverity[stack_use_local_overflow] */
 	vma_ibv_wc wce[MCE_MAX_CQ_POLL_BATCH];
 
@@ -987,7 +978,6 @@ int cq_mgr::poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready
 	}
 	
 	return ret_rx_processed;	
-#endif // DEFINED_VMAPOLL
 }
 
 int cq_mgr::poll_and_process_helper_tx(uint64_t* p_cq_poll_sn)
@@ -995,42 +985,6 @@ int cq_mgr::poll_and_process_helper_tx(uint64_t* p_cq_poll_sn)
 	// Assume locked!!!
 	cq_logfuncall("");
 	
-#ifdef DEFINED_VMAPOLL
-	int ret = 0;
-	volatile mlx5_cqe64 *cqe_err = NULL;
-	volatile mlx5_cqe64 *cqe = mlx5_get_cqe64(&cqe_err);
-
-	if (likely(cqe)) {
-		m_qp->m_mlx5_hw_qp->sq.tail += NUM_TX_WRE_TO_SIGNAL_MAX;
-		uint16_t wqe_ctr = ntohs(cqe->wqe_counter);
-		int index = wqe_ctr & (m_qp->m_tx_num_wr - 1);
-		mem_buf_desc_t* buff = (mem_buf_desc_t*)(uintptr_t)m_qp->m_sq_wqe_idx_to_wrid[index];
-
-		// spoil the global sn if we have packets ready
-		union __attribute__((packed)) {
-			uint64_t global_sn;
-			struct {
-				uint32_t cq_id;
-				uint32_t cq_sn;
-			} bundle;
-		} next_sn;
-		next_sn.bundle.cq_sn = ++m_n_cq_poll_sn;
-		next_sn.bundle.cq_id = m_cq_id;
-
-		*p_cq_poll_sn = m_n_global_sn = next_sn.global_sn;
-
-		process_tx_buffer_list(buff);
-		ret = 1;
-	}
-	else if (cqe_err) {
-		ret = mlx5_poll_and_process_error_element_tx(cqe_err, p_cq_poll_sn);
-	}
-	else {
-		*p_cq_poll_sn = m_n_global_sn;
-	}
-
-	return ret;	
-#else
 	/* coverity[stack_use_local_overflow] */
 	vma_ibv_wc wce[MCE_MAX_CQ_POLL_BATCH];
 	int ret = poll(wce, m_n_sysvar_cq_poll_batch_max, p_cq_poll_sn);
@@ -1047,7 +1001,6 @@ int cq_mgr::poll_and_process_helper_tx(uint64_t* p_cq_poll_sn)
 		}
 	}
 	return ret;
-#endif // DEFINED_VMAPOLL	
 }
 
 #ifdef DEFINED_VMAPOLL
@@ -1590,26 +1543,17 @@ void cq_mgr::modify_cq_moderation(uint32_t period, uint32_t count)
 #endif
 }
 
-#ifdef DEFINED_VMAPOLL
-void cq_mgr::mlx5_init_cq()
-{
-	struct ibv_cq *ibcq = m_p_ibv_cq;
-	m_mlx5_cq = _to_mxxx(cq, cq);
-	m_cq_db = m_mlx5_cq->dbrec;
-	m_mlx5_cqes = (volatile struct mlx5_cqe64 (*)[])(uintptr_t)m_mlx5_cq->active_buf->buf;
-}
-#endif // DEFINED_VMAPOLL
-
 #ifdef HAVE_INFINIBAND_MLX5_HW_H
 cq_mgr_mlx5::cq_mgr_mlx5(ring_simple* p_ring, ib_ctx_handler* p_ib_ctx_handler, uint32_t cq_size, struct ibv_comp_channel* p_comp_event_channel, bool is_rx):
 	cq_mgr(p_ring, p_ib_ctx_handler, cq_size, p_comp_event_channel, is_rx)
-	, m_cq_size(cq_size)
-	, m_cq_cons_index(0)
+	, m_qp(NULL)
 	, m_cqes(NULL)
 	, m_cq_dbell(NULL)
 	, m_rx_hot_buffer(NULL)
-	,m_rq(NULL)
-	,m_p_rq_wqe_idx_to_wrid(NULL)
+	, m_rq(NULL)
+	, m_p_rq_wqe_idx_to_wrid(NULL)
+	, m_cq_size(cq_size)
+	, m_cq_cons_index(0)
 {
 	cq_logfunc("");
 
@@ -1641,7 +1585,7 @@ inline volatile struct mlx5_cqe64* cq_mgr_mlx5::check_cqe(void)
 	return cqe;
 }
 
-volatile struct mlx5_cqe64*	cq_mgr_mlx5::check_error_completion(uint8_t op_own)
+volatile struct mlx5_cqe64* cq_mgr_mlx5::check_error_completion(uint8_t op_own)
 {
 	switch (op_own >> 4) {
 		case MLX5_CQE_INVALID:
@@ -1658,7 +1602,84 @@ volatile struct mlx5_cqe64*	cq_mgr_mlx5::check_error_completion(uint8_t op_own)
 	}
 }
 
-inline mem_buf_desc_t*		cq_mgr_mlx5::poll(uint32_t&	opcode, uint32_t&	status)
+int cq_mgr_mlx5::poll_and_process_error_element_tx(volatile struct mlx5_cqe64 *cqe, uint64_t* p_cq_poll_sn)
+{
+	uint16_t wqe_ctr = ntohs(cqe->wqe_counter);
+	int index = wqe_ctr & (m_qp->m_tx_num_wr - 1);
+	mem_buf_desc_t* buff = NULL;
+	vma_ibv_wc wce;
+
+	m_qp->m_mlx5_hw_qp->sq.tail += NUM_TX_WRE_TO_SIGNAL_MAX;
+
+	// spoil the global sn if we have packets ready
+	union __attribute__((packed)) {
+		uint64_t global_sn;
+		struct {
+			uint32_t cq_id;
+			uint32_t cq_sn;
+		} bundle;
+	} next_sn;
+	next_sn.bundle.cq_sn = ++m_n_cq_poll_sn;
+	next_sn.bundle.cq_id = m_cq_id;
+
+	*p_cq_poll_sn = m_n_global_sn = next_sn.global_sn;
+
+	memset(&wce, 0, sizeof(wce));
+	wce.wr_id = m_qp->m_sq_wqe_idx_to_wrid[index];
+	cqe64_to_vma_wc(cqe, &wce);
+
+	buff = process_cq_element_tx(&wce);
+	if (buff) {
+		process_tx_buffer_list(buff);
+	}
+
+	return 1;
+}
+
+
+int cq_mgr_mlx5::poll_and_process_helper_tx(uint64_t* p_cq_poll_sn)
+{
+	// Assume locked!!!
+	cq_logfuncall("MLX5");
+
+	int ret = 0;
+	volatile mlx5_cqe64 *cqe_err = NULL;
+	volatile mlx5_cqe64 *cqe = get_cqe64(&cqe_err);
+
+	if (likely(cqe)) {
+		m_qp->m_mlx5_hw_qp->sq.tail += NUM_TX_WRE_TO_SIGNAL_MAX;
+		uint16_t wqe_ctr = ntohs(cqe->wqe_counter);
+		int index = wqe_ctr & (m_qp->m_tx_num_wr - 1);
+		mem_buf_desc_t* buff = (mem_buf_desc_t*)(uintptr_t)m_qp->m_sq_wqe_idx_to_wrid[index];
+
+		// spoil the global sn if we have packets ready
+		union __attribute__((packed)) {
+			uint64_t global_sn;
+			struct {
+				uint32_t cq_id;
+				uint32_t cq_sn;
+			} bundle;
+		} next_sn;
+		next_sn.bundle.cq_sn = ++m_n_cq_poll_sn;
+		next_sn.bundle.cq_id = m_cq_id;
+
+		*p_cq_poll_sn = m_n_global_sn = next_sn.global_sn;
+
+		process_tx_buffer_list(buff);
+		ret = 1;
+	}
+	else if (cqe_err) {
+		ret = poll_and_process_error_element_tx(cqe_err, p_cq_poll_sn);
+	}
+	else {
+		*p_cq_poll_sn = m_n_global_sn;
+	}
+
+	return ret;
+}
+
+
+inline mem_buf_desc_t* cq_mgr_mlx5::poll(uint32_t& opcode, uint32_t& status)
 {
 	mem_buf_desc_t *buff = NULL;
 
@@ -1716,7 +1737,7 @@ inline mem_buf_desc_t*		cq_mgr_mlx5::poll(uint32_t&	opcode, uint32_t&	status)
 	return buff;
 }
 
-inline void		cq_mgr_mlx5::cqe64_to_mem_buff_desc(volatile struct mlx5_cqe64 *cqe, mem_buf_desc_t* p_rx_wc_buf_desc, uint32_t& opcode, uint32_t& status)
+inline void cq_mgr_mlx5::cqe64_to_mem_buff_desc(volatile struct mlx5_cqe64 *cqe, mem_buf_desc_t* p_rx_wc_buf_desc, uint32_t& opcode, uint32_t& status)
 {
 	struct mlx5_err_cqe *ecqe;
 	ecqe = (struct mlx5_err_cqe *)cqe;
@@ -1938,6 +1959,7 @@ int cq_mgr_mlx5::poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_
 
 void	cq_mgr_mlx5::add_qp_rx(qp_mgr* qp)
 {
+	cq_logfunc("MLX5 adding QP");
 	cq_mgr::add_qp_rx(qp);
 	struct verbs_qp *vqp = (struct verbs_qp *)qp->m_qp;
 	struct mlx5_qp	* mlx5_hw_qp = (struct mlx5_qp*)container_of(vqp, struct mlx5_qp, verbs_qp);
@@ -1947,6 +1969,7 @@ void	cq_mgr_mlx5::add_qp_rx(qp_mgr* qp)
 
 void	cq_mgr_mlx5::del_qp_rx(qp_mgr *qp)
 {
+	cq_logfunc("MLX5 deleting QP");
 	cq_mgr::del_qp_rx(qp);
 	m_rq = NULL;
 	m_p_rq_wqe_idx_to_wrid = NULL;

@@ -83,15 +83,13 @@ inline void ring_simple::send_status_handler(int ret, vma_ibv_send_wr* p_send_wq
 
 qp_mgr* ring_eth::create_qp_mgr(const ib_ctx_handler* ib_ctx, uint8_t port_num, struct ibv_comp_channel* p_rx_comp_event_channel) throw (vma_error)
 {
-#if !defined(DEFINED_VMAPOLL) && defined(HAVE_INFINIBAND_MLX5_HW_H)
 	if (strstr(((ib_ctx_handler*)ib_ctx)->get_ibv_device()->name, "mlx5")) {
+		ring_logfunc("Creating MLX5 qp_mgr");
 		return new qp_mgr_eth_mlx5(this, ib_ctx, port_num, p_rx_comp_event_channel, get_tx_num_wr(), get_partition());
 	} else {
+		ring_logfunc("Creating default (ibv) qp_mgr");
 		return new qp_mgr_eth(this, ib_ctx, port_num, p_rx_comp_event_channel, get_tx_num_wr(), get_partition());
 	}
-#else
-	return new qp_mgr_eth(this, ib_ctx, port_num, p_rx_comp_event_channel, get_tx_num_wr(), get_partition());
-#endif
 }
 
 qp_mgr* ring_ib::create_qp_mgr(const ib_ctx_handler* ib_ctx, uint8_t port_num, struct ibv_comp_channel* p_rx_comp_event_channel) throw (vma_error)

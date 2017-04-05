@@ -53,14 +53,8 @@
 #ifdef HAVE_INFINIBAND_MLX5_HW_H
 #include <infiniband/mlx5_hw.h>
 #endif
-#if 0
-REVIEW: verify can remove: #include "vma/dev/ring.h"
-#endif
 
-#ifdef DEFINED_VMAPOLL
-#include <infiniband/mlx5_hw.h>
 #include "vma/hw/mlx5/wqe.h"
-#endif // DEFINED_VMAPOLL
 
 class buffer_pool;
 class cq_mgr;
@@ -112,11 +106,11 @@ public:
 	qp_mgr(const ring_simple* p_ring, const ib_ctx_handler* p_context, const uint8_t port_num, const uint32_t tx_num_wr);
 	virtual ~qp_mgr();
 
-	void 			up();
-	void 			down();
+	virtual void 		up();
+	virtual void 		down();
 
 	int			post_recv(mem_buf_desc_t* p_mem_buf_desc); // Post for receive a list of mem_buf_desc
-	int 			send(vma_ibv_send_wr* p_send_wqe);
+	virtual int		send(vma_ibv_send_wr* p_send_wqe);
 
 	uint32_t		get_max_inline_tx_data() const {return m_max_inline_data; }
 	int			get_port_num() const { return m_port_num; }
@@ -148,29 +142,11 @@ public:
 	void			release_rx_buffers();
 	void 			release_tx_buffers();
 	void			trigger_completion_for_all_sent_packets();
-#ifdef DEFINED_VMAPOLL
-	void 			set_signal_in_next_send_wqe();	
-	void 			mlx5_send(vma_ibv_send_wr* p_send_wqe);
-	void 			mlx5_init_sq();
-#endif // DEFINED_VMAPOLL	
 
 protected:
 	uint64_t		m_rq_wqe_counter;
 	uint64_t		*m_rq_wqe_idx_to_wrid;
 
-#ifdef DEFINED_VMAPOLL
-	struct mlx5_qp		*m_mlx5_hw_qp;
-	volatile struct		mlx5_wqe64* m_sq_hot_wqe;
-	int			m_sq_hot_wqe_index;
-	volatile struct mlx5_wqe64 (*m_mlx5_sq_wqes)[];
-	volatile uint32_t 		*m_sq_db;
-	volatile void 			*m_sq_bf_reg;
-	uint16_t 				m_sq_bf_offset;
-	uint16_t 				m_sq_bf_buf_size;
-	uint16_t				m_sq_wqe_counter;
-	uint64_t				*m_sq_wqe_idx_to_wrid;
-	unsigned int 			m_qp_num;
-#endif // DEFINED_VMAPOLL	
 	struct ibv_qp*		m_qp;
 
 	ring_simple*		m_p_ring;
@@ -240,21 +216,43 @@ private:
 	const uint16_t 		m_vlan;
 };
 
-#if !defined(DEFINED_VMAPOLL) && defined(HAVE_INFINIBAND_MLX5_HW_H)
+//#if defined(HAVE_INFINIBAND_MLX5_HW_H)
 class qp_mgr_eth_mlx5 : public qp_mgr_eth
 {
+friend class cq_mgr_mlx5;
+
 public:
 	qp_mgr_eth_mlx5(const ring_simple* p_ring, const ib_ctx_handler* p_context, const uint8_t port_num,
-			struct ibv_comp_channel* p_rx_comp_event_channel, const uint32_t tx_num_wr, const uint16_t vlan) throw (vma_error):
-					qp_mgr_eth(p_ring, p_context, port_num, p_rx_comp_event_channel, tx_num_wr, vlan, false) {
-						if(configure(p_rx_comp_event_channel)) throw_vma_exception("failed creating qp_mgr_eth");}
+			struct ibv_comp_channel* p_rx_comp_event_channel, const uint32_t tx_num_wr, const uint16_t vlan) throw (vma_error);
+	virtual		~qp_mgr_eth_mlx5();
 
-	virtual ~qp_mgr_eth_mlx5() {}
+	void 			up();
+	void 			down();
+	virtual int		send(vma_ibv_send_wr* p_send_wqe);
+
+protected:
+	struct mlx5_qp		*m_mlx5_hw_qp;
+	volatile struct		mlx5_wqe64* m_sq_hot_wqe;
+	volatile struct mlx5_wqe64 (*m_mlx5_sq_wqes)[];
+	volatile uint32_t 	*m_sq_db;
+	volatile void 		*m_sq_bf_reg;
+	uint64_t		*m_sq_wqe_idx_to_wrid;
+	int			m_sq_hot_wqe_index;
+	unsigned int 		m_qp_num;
+	uint16_t 		m_sq_bf_offset;
+	uint16_t 		m_sq_bf_buf_size;
+	uint16_t		m_sq_wqe_counter;
 
 private:
-	cq_mgr*	init_rx_cq_mgr(struct ibv_comp_channel* p_rx_comp_event_channel);
+	cq_mgr*		init_rx_cq_mgr(struct ibv_comp_channel* p_rx_comp_event_channel);
+	cq_mgr*		init_tx_cq_mgr(void);
+	void 		set_signal_in_next_send_wqe();
+	void 		mlx5_send(vma_ibv_send_wr* p_send_wqe);
+	inline void 	mlx5_init_sq();
+	inline void	configure_hw(void);
+
 };
-#endif
+//#endif
 
 class qp_mgr_ib : public qp_mgr
 {
