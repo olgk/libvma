@@ -141,14 +141,14 @@ public:
 	 */
 	int	wait_for_notification_and_process_element(uint64_t* p_cq_poll_sn,
 	   	                                          void* pv_fd_ready_array = NULL);
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 	inline volatile struct mlx5_cqe64 *mlx5_get_cqe64(void);
 	inline volatile struct mlx5_cqe64 *mlx5_get_cqe64(volatile struct mlx5_cqe64 **cqe_err);
 	volatile struct mlx5_cqe64 *mlx5_check_error_completion(volatile struct mlx5_cqe64 *cqe, volatile uint16_t *ci, uint8_t op_own);
 	inline void mlx5_cqe64_to_vma_wc(volatile struct mlx5_cqe64 *cqe, vma_ibv_wc *wce);
 	int mlx5_poll_and_process_error_element_rx(volatile struct mlx5_cqe64 *cqe, void* pv_fd_ready_array);
 	int mlx5_poll_and_process_error_element_tx(volatile struct mlx5_cqe64 *cqe, uint64_t* p_cq_poll_sn);
-#endif // DEFINED_VMAPOLL	
+//#endif // DEFINED_VMAPOLL
 
 	/**
 	 * This will poll n_num_poll time on the cq or stop early if it gets
@@ -192,12 +192,12 @@ public:
 	void 	modify_cq_moderation(uint32_t period, uint32_t count);
 
 	inline void convert_hw_time_to_system_time(uint64_t hwtime, struct timespec* systime) { m_p_ib_ctx_handler->convert_hw_time_to_system_time(hwtime, systime); }
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 	void 	mlx5_init_cq();
-#endif // DEFINED_VMAPOLL	
+//#endif // DEFINED_VMAPOLL
 
 private:
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 	mem_buf_desc_t* 		m_rx_hot_buff;
 	qp_mgr*				m_qp;
 	struct mlx5_cq* 		m_mlx5_cq;
@@ -205,7 +205,7 @@ private:
 	uint16_t 			m_cq_ci;
 	volatile struct mlx5_cqe64 	(*m_mlx5_cqes)[];
 	volatile uint32_t 		*m_cq_db;
-#endif // DEFINED_VMAPOLL
+//#endif // DEFINED_VMAPOLL
 	ring_simple*			m_p_ring;
 	ib_ctx_handler*			m_p_ib_ctx_handler;
 	bool				m_b_is_rx;
@@ -267,6 +267,7 @@ private:
 #endif // DEFINED_VMAPOLL	
 	virtual int		poll_and_process_helper_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array = NULL);
 	int		poll_and_process_helper_tx(uint64_t* p_cq_poll_sn);
+	int		pollcq_and_process_helper_tx(uint64_t* p_cq_poll_sn);
 
 	inline void	compensate_qp_poll_failed();
 	// Returns true if the given buffer was used,

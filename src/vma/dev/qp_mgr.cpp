@@ -75,7 +75,7 @@ qp_mgr::qp_mgr(const ring_simple* p_ring, const ib_ctx_handler* p_context, const
 	m_ibv_rx_sg_array = new ibv_sge[m_n_sysvar_rx_num_wr_to_post_recv];
 	m_ibv_rx_wr_array = new ibv_recv_wr[m_n_sysvar_rx_num_wr_to_post_recv];
 
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 	m_sq_wqe_counter = 0;
 
 	m_rq_wqe_idx_to_wrid = (uint64_t*)mmap(NULL, m_rx_num_wr * sizeof(*m_rq_wqe_idx_to_wrid),
@@ -88,7 +88,7 @@ qp_mgr::qp_mgr(const ring_simple* p_ring, const ib_ctx_handler* p_context, const
 	if (m_sq_wqe_idx_to_wrid == MAP_FAILED) {
 		qp_logerr("Failed allocating m_sq_wqe_idx_to_wrid (errno=%d %m)", errno);
 	}
-#endif // DEFINED_VMAPOLL
+//#endif // DEFINED_VMAPOLL
 }
 
 qp_mgr::~qp_mgr()
@@ -120,16 +120,16 @@ qp_mgr::~qp_mgr()
 	delete[] m_ibv_rx_sg_array;
 	delete[] m_ibv_rx_wr_array;
 
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 	munmap(m_rq_wqe_idx_to_wrid, m_rx_num_wr * sizeof(*m_rq_wqe_idx_to_wrid));
 	munmap(m_sq_wqe_idx_to_wrid, m_tx_num_wr * sizeof(*m_sq_wqe_idx_to_wrid));
-#endif // DEFINED_VMAPOLL
+//#endif // DEFINED_VMAPOLL
 
-#ifndef DEFINED_VMAPOLL
+//#ifndef DEFINED_VMAPOLL
 	delete[] m_rq_wqe_idx_to_wrid;
-#else
-	free(m_rq_wqe_idx_to_wrid);
-#endif
+//#else
+//	free(m_rq_wqe_idx_to_wrid);
+//#endif
 	qp_logdbg("Rx buffer poll: %d free global buffers available", g_buffer_pool_rx->get_free_count());
 	qp_logdbg("delete done");
 }
@@ -219,7 +219,8 @@ int qp_mgr::configure(struct ibv_comp_channel* p_rx_comp_event_channel)
 
 	// Check device capabilities for max SG elements
 	uint32_t tx_max_inline = safe_mce_sys().tx_max_inline;
-	uint32_t rx_num_sge = (IS_VMAPOLL) ? 1 : MCE_DEFAULT_RX_NUM_SGE;
+//	uint32_t rx_num_sge = (IS_VMAPOLL) ? 1 : MCE_DEFAULT_RX_NUM_SGE;
+	uint32_t rx_num_sge = 1;
 	uint32_t tx_num_sge = MCE_DEFAULT_TX_NUM_SGE;
 
 	qp_init_attr.cap.max_send_wr = m_tx_num_wr;
@@ -244,9 +245,10 @@ int qp_mgr::configure(struct ibv_comp_channel* p_rx_comp_event_channel)
 		return -1;
 	} ENDIF_VERBS_FAILURE;
 
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 	struct verbs_qp *vqp = (struct verbs_qp *)m_qp;
 	m_mlx5_hw_qp = (struct mlx5_qp*)container_of(vqp, struct mlx5_qp, verbs_qp);
+
 	m_qp_num = m_mlx5_hw_qp->ctrl_seg.qp_num;
 	m_mlx5_sq_wqes = (volatile struct mlx5_wqe64 (*)[])(uintptr_t)m_mlx5_hw_qp->gen_data.sqstart;
 	m_sq_db = &m_mlx5_hw_qp->gen_data.db[MLX5_SND_DBR];
@@ -254,7 +256,7 @@ int qp_mgr::configure(struct ibv_comp_channel* p_rx_comp_event_channel)
 	m_sq_bf_offset = m_mlx5_hw_qp->gen_data.bf->offset;
 	m_sq_bf_buf_size = m_mlx5_hw_qp->gen_data.bf->buf_size;
 	mlx5_init_sq();
-#endif // DEFINED_VMAPOLL
+//#endif // DEFINED_VMAPOLL
 
 	m_max_inline_data = min(tmp_ibv_qp_init_attr.cap.max_inline_data, tx_max_inline);
 	qp_logdbg("requested max inline = %d QP, actual max inline = %d, VMA max inline set to %d, max_send_wr=%d, max_recv_wr=%d, max_recv_sge=%d, max_send_sge=%d",
@@ -370,13 +372,13 @@ void qp_mgr::release_tx_buffers()
 	}
 }
 
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 void qp_mgr::set_signal_in_next_send_wqe()
 {
 	volatile struct mlx5_wqe64 *wqe = &(*m_mlx5_sq_wqes)[m_sq_wqe_counter & (m_tx_num_wr - 1)];
 	wqe->ctrl.data[2] = htonl(8);
 }
-#endif // DEFINED_VMAPOLL
+//#endif // DEFINED_VMAPOLL
 
 void qp_mgr::trigger_completion_for_all_sent_packets()
 {
@@ -460,11 +462,12 @@ void qp_mgr::trigger_completion_for_all_sent_packets()
 		}
 		m_p_ring->m_tx_num_wr_free--;
 
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 		NOT_IN_USE(bad_wr);
 		set_signal_in_next_send_wqe();
 		mlx5_send(&send_wr);
-#else
+//#else
+#if 0
 		IF_VERBS_FAILURE(vma_ibv_post_send(m_qp, &send_wr, &bad_wr)) {
 			qp_logerr("failed post_send%s (errno=%d %m)", ((vma_send_wr_send_flags(send_wr) & VMA_IBV_SEND_INLINE)?"(+inline)":""), errno);
 			if (bad_wr) {
@@ -582,7 +585,7 @@ int qp_mgr::post_recv(mem_buf_desc_t* p_mem_buf_desc)
 	return 0;
 }
 
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 static inline void mlx5_bf_copy(volatile uintptr_t *dst, volatile uintptr_t *src)
 {
 	COPY_64B_NT(dst, src);
@@ -641,9 +644,7 @@ void qp_mgr::mlx5_send(vma_ibv_send_wr *p_send_wqe)
 	m_sq_hot_wqe->ctrl.data[0] = htonl((m_sq_wqe_counter << 8) | MLX5_OPCODE_SEND);
 	m_sq_hot_wqe_index = m_sq_wqe_counter & (m_tx_num_wr - 1);
 }
-#endif // DEFINED_VMAPOLL
 
-#ifdef DEFINED_VMAPOLL
 void qp_mgr::mlx5_init_sq()
 {
 	unsigned int i;
@@ -670,7 +671,7 @@ void qp_mgr::mlx5_init_sq()
 	m_sq_hot_wqe_index = 0;
 	qp_logdbg("%p: allocated and configured %u WRs", this, m_tx_num_wr);
 }
-#endif // DEFINED_VMAPOLL
+//#endif // DEFINED_VMAPOLL
 
 // REVIEW - qp_mgr::send() should be redesigend between master/slave. 
 // Most of the code before the merge is the same
@@ -680,9 +681,9 @@ int qp_mgr::send(vma_ibv_send_wr* p_send_wqe)
 	bool is_signaled;
 	int ret;
 
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 	is_signaled = ++m_n_unsignaled_count >= NUM_TX_WRE_TO_SIGNAL_MAX;	
-#else
+#if 0 //else
 	is_signaled = ++m_n_unsignaled_count >= m_n_sysvar_tx_num_wr_to_signal;
 #endif
 
@@ -715,7 +716,7 @@ int qp_mgr::send(vma_ibv_send_wr* p_send_wqe)
 	TAKE_T_TX_POST_SEND_START;
 #endif
 
-#ifdef DEFINED_VMAPOLL
+//#ifdef DEFINED_VMAPOLL
 #ifdef RDTSC_MEASURE_TX_VERBS_POST_SEND
 	RDTSC_TAKE_START(g_rdtsc_instr_info_arr[RDTSC_FLOW_TX_VERBS_POST_SEND]);
 #endif //RDTSC_MEASURE_TX_SENDTO_TO_AFTER_POST_SEND
@@ -727,7 +728,8 @@ int qp_mgr::send(vma_ibv_send_wr* p_send_wqe)
 #ifdef RDTSC_MEASURE_TX_SENDTO_TO_AFTER_POST_SEND
 	RDTSC_TAKE_END(g_rdtsc_instr_info_arr[RDTSC_FLOW_SENDTO_TO_AFTER_POST_SEND]);
 #endif //RDTSC_MEASURE_TX_SENDTO_TO_AFTER_POST_SEND
-#else // DEFINED_VMAPOLLL
+//#else // DEFINED_VMAPOLLL
+#if 0
 	vma_ibv_send_wr *bad_wr = NULL;
 	IF_VERBS_FAILURE(vma_ibv_post_send(m_qp, p_send_wqe, &bad_wr)) {
 #ifdef VMA_TIME_MEASURE
@@ -749,13 +751,13 @@ int qp_mgr::send(vma_ibv_send_wr* p_send_wqe)
 	if (is_signaled) {
 
 		// Clear the SINGAL request
-#ifndef DEFINED_VMAPOLL	// not defined
+//#ifndef DEFINED_VMAPOLL	// not defined
+#if 0
 		vma_send_wr_send_flags(*p_send_wqe) = (vma_ibv_send_flags)(vma_send_wr_send_flags(*p_send_wqe) & ~VMA_IBV_SEND_SIGNALED);
 #endif // DEFINED_VMAPOLL				
 
 		// Poll the Tx CQ
 		uint64_t dummy_poll_sn = 0;
-		m_n_tx_count = 0;
 		ret = m_p_cq_mgr_tx->poll_and_process_element_tx(&dummy_poll_sn);
 		BULLSEYE_EXCLUDE_BLOCK_START
 		if (ret < 0) {
