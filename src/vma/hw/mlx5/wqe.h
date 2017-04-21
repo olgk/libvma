@@ -34,6 +34,8 @@
 #define WQE_H
 
 #define MLX5_ETH_INLINE_HEADER_SIZE 16
+#define OCTOWORD	16
+#define WQEBB		64
 
 #ifndef DEFINED_MLX5_HW_ETH_WQE_HEADER
 enum {
