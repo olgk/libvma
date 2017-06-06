@@ -35,6 +35,7 @@
 #define QP_MGR_ETH_MLX5_H
 
 #include "qp_mgr.h"
+#include "vma/util/sg_array.h"
 
 #if defined(HAVE_INFINIBAND_MLX5_HW_H)
 
@@ -60,11 +61,12 @@ private:
 
 	inline void	set_signal_in_next_send_wqe();
 
-//	int		fill_wqe(vma_ibv_send_wr* p_send_wqe);
-//	inline void	send_by_bf(volatile uintptr_t *addr, int size);
-//	inline void	send_by_bf_wrap_up(volatile uintptr_t *first_addr, int first_times, volatile uintptr_t *sec_addr, int sec_times);
-//	inline void	bf_copy(volatile uintptr_t *dst, volatile uintptr_t *src, int times);
-
+	inline int	fill_wqe(vma_ibv_send_wr* p_send_wqe);
+	inline void	send_by_bf(volatile uintptr_t *addr, int size);
+	inline void	send_by_bf_wrap_up(volatile uintptr_t *first_addr, int bot_size, volatile uintptr_t *sec_addr, int top_size);
+	inline void	bf_copy(volatile uintptr_t *dst, volatile uintptr_t *src, int times);
+	inline int	fill_inl_seg(sg_array &sga, uint8_t *cur_seg, uint8_t* data_addr, int max_inline_len, int inline_len);
+	inline int	fill_ptr_seg(sg_array &sga, struct mlx5_wqe_data_seg* dp_seg, uint8_t* data_addr, int data_len);
 	void		init_sq();
 
 	volatile struct mlx5_wqe64	(*m_sq_wqes)[];

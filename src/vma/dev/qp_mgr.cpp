@@ -85,6 +85,7 @@ qp_mgr::qp_mgr(const ring_simple* p_ring, const ib_ctx_handler* p_context,
 {
 	m_ibv_rx_sg_array = new ibv_sge[m_n_sysvar_rx_num_wr_to_post_recv];
 	m_ibv_rx_wr_array = new ibv_recv_wr[m_n_sysvar_rx_num_wr_to_post_recv];
+
 	set_unsignaled_count();
 
 #ifdef DEFINED_VMAPOLL
@@ -200,9 +201,9 @@ int qp_mgr::configure(struct ibv_comp_channel* p_rx_comp_event_channel)
 	memset(&qp_init_attr, 0, sizeof(qp_init_attr));
 
 	// Check device capabilities for max SG elements
-	uint32_t tx_max_inline = safe_mce_sys().tx_max_inline;
+	uint32_t tx_max_inline = 0;safe_mce_sys().tx_max_inline;
 	uint32_t rx_num_sge = (IS_VMAPOLL) ? 1 : MCE_DEFAULT_RX_NUM_SGE;
-	uint32_t tx_num_sge = (IS_VMAPOLL) ? 1 : MCE_DEFAULT_TX_NUM_SGE;
+	uint32_t tx_num_sge = 1;//(IS_VMAPOLL) ? 1 : MCE_DEFAULT_TX_NUM_SGE;
 
 	qp_init_attr.cap.max_send_wr = m_tx_num_wr;
 	qp_init_attr.cap.max_recv_wr = m_rx_num_wr;
@@ -226,10 +227,6 @@ int qp_mgr::configure(struct ibv_comp_channel* p_rx_comp_event_channel)
 		return -1;
 	} ENDIF_VERBS_FAILURE;
 
-	m_max_inline_data = min(tmp_ibv_qp_init_attr.cap.max_inline_data, tx_max_inline);
-	qp_logdbg("requested max inline = %d QP, actual max inline = %d, VMA max inline set to %d, max_send_wr=%d, max_recv_wr=%d, max_recv_sge=%d, max_send_sge=%d",
-		tx_max_inline, tmp_ibv_qp_init_attr.cap.max_inline_data, m_max_inline_data, qp_init_attr.cap.max_send_wr, qp_init_attr.cap.max_recv_wr, qp_init_attr.cap.max_recv_sge, qp_init_attr.cap.max_send_sge);
-
 	// All buffers will be allocated from this qp_mgr buffer pool so we can already set the Rx & Tx lkeys
 	for (uint32_t wr_idx = 0; wr_idx < m_n_sysvar_rx_num_wr_to_post_recv; wr_idx++) {
 		m_ibv_rx_wr_array[wr_idx].sg_list = &m_ibv_rx_sg_array[wr_idx];
@@ -251,10 +248,11 @@ int qp_mgr::configure(struct ibv_comp_channel* p_rx_comp_event_channel)
 		m_p_cq_mgr_tx->add_qp_tx(this);
 	}
 
-	qp_logdbg("Created QP (num=%x) with %d tx wre and inline=%d and %d rx "
+	qp_logdbg("Created QP (num=%d) with %d tx wre and inline=%d and %d rx "
 		"wre and %d sge", m_qp->qp_num, m_tx_num_wr, m_max_inline_data,
 		m_rx_num_wr, rx_num_sge);
-
+	printf("QPnum=%d\n", m_qp->qp_num);
+//sleep(10);
 	return 0;
 }
 
@@ -320,14 +318,15 @@ void qp_mgr::release_rx_buffers()
 	}
 	// Wait for all FLUSHed WQE on Rx CQ
 	qp_logdbg("draining rx cq_mgr %p (last_posted_rx_wr_id = %p)", m_p_cq_mgr_rx, m_last_posted_rx_wr_id);
-	uintptr_t last_polled_rx_wr_id = 0;
+	uintptr_t last_polled_rx_wr_id = 0L;
 	while (m_p_cq_mgr_rx && last_polled_rx_wr_id != m_last_posted_rx_wr_id) {
 
 		// Process the FLUSH'ed WQE's
 		int ret = m_p_cq_mgr_rx->drain_and_proccess(&last_polled_rx_wr_id);
 		qp_logdbg("draining completed on rx cq_mgr (%d wce) last_polled_rx_wr_id = %p", ret, last_polled_rx_wr_id);
 		total_ret += ret;
-
+		if (last_polled_rx_wr_id == 0L)
+			break;
 		// Add short delay (500 usec) to allow for WQE's to be flushed to CQ every poll cycle
 		const struct timespec short_sleep = {0, 500000}; // 500 usec
 		nanosleep(&short_sleep, NULL);
@@ -650,7 +649,7 @@ void qp_mgr_eth::modify_qp_to_ready_state()
 
 int qp_mgr_eth::prepare_ibv_qp(vma_ibv_qp_init_attr& qp_init_attr)
 {
-	qp_logdbg("");
+	qp_logdbg("inline: %d", qp_init_attr.cap.max_inline_data);
 	int ret = 0;
 
 	qp_init_attr.qp_type = IBV_QPT_RAW_PACKET;

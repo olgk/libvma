@@ -544,7 +544,7 @@ int cq_mgr_mlx5::poll_and_process_element_tx(uint64_t* p_cq_poll_sn)
 		uint16_t wqe_ctr = ntohs(cqe->wqe_counter);
 		int index = wqe_ctr & (m_qp->m_tx_num_wr - 1);
 		mem_buf_desc_t* buff = (mem_buf_desc_t*)(uintptr_t)m_qp->m_sq_wqe_idx_to_wrid[index];
-
+cq_logfunc("cqe: %p wqe_id: %d wqe_counter: %d index: %d buff: %p", cqe, cqe->wqe_id, wqe_ctr, index, buff);
 		// spoil the global sn if we have packets ready
 		union __attribute__((packed)) {
 			uint64_t global_sn;
@@ -562,6 +562,7 @@ int cq_mgr_mlx5::poll_and_process_element_tx(uint64_t* p_cq_poll_sn)
 		ret = 1;
 	}
 	else if (cqe_err) {
+cq_logdbg("cqe_err: %p wqe_id: %d wqe_counter: %d", cqe_err, cqe_err->wqe_id, cqe_err->wqe_counter);
 		ret = poll_and_process_error_element_tx(cqe_err, p_cq_poll_sn);
 	}
 	else {

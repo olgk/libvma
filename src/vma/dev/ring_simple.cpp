@@ -1780,6 +1780,7 @@ int ring_simple::put_tx_buffers(mem_buf_desc_t* buff_list)
 			free_lwip_pbuf(&buff_list->lwip_pbuf);
 			m_tx_pool.push_back(buff_list);
 		}
+ring_logdbg("buf_list: %p count: %d next: %p", buff_list, count, next);
 		count++;
 		buff_list = next;
 	}
