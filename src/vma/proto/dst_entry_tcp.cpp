@@ -281,18 +281,16 @@ void dst_entry_tcp::put_buffer(mem_buf_desc_t * p_desc)
 
 	if (unlikely(p_desc == NULL))
 		return;
-
 	if (likely(m_p_ring->is_member(p_desc->p_desc_owner))) {
 		m_p_ring->mem_buf_desc_return_single_to_owner_tx(p_desc);
 	} else {
-
 		//potential race, ref is protected here by tcp lock, and in ring by ring_tx lock
-		if (likely(p_desc->lwip_pbuf.pbuf.ref))
-			p_desc->lwip_pbuf.pbuf.ref--;
+		if (likely(p_desc->lwip_pbuf_get_ref_count()))
+			p_desc->lwip_pbuf_dec_ref_count();
 		else
 			dst_tcp_logerr("ref count of %p is already zero, double free??", p_desc);
 
-		if (p_desc->lwip_pbuf.pbuf.ref == 0) {
+		if (p_desc->lwip_pbuf_get_ref_count() == 0) {
 			p_desc->p_next_desc = NULL;
 			g_buffer_pool_tx->put_buffers_thread_safe(p_desc);
 		}

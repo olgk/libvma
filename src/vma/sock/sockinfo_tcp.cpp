@@ -726,7 +726,6 @@ retry_is_ready:
 		errno = EIO;
 		return -1;
 	}
-
 	for (int i = 0; i < sz_iov; i++) {
 		si_tcp_logfunc("iov:%d base=%p len=%d", i, p_iov[i].iov_base, p_iov[i].iov_len);
 
@@ -836,6 +835,10 @@ done:
 
 	tcp_output(&m_pcb); // force data out
 
+#ifdef RDTSC_MEASURE_TX_SENDTO_TO_AFTER_POST_SEND
+	       RDTSC_TAKE_END(g_rdtsc_instr_info_arr[RDTSC_FLOW_SENDTO_TO_AFTER_POST_SEND]);
+#endif // RDTSC_MEASURE_TX_SENDTO_TO_AFTER_POST_SEND
+
 	if (unlikely(is_dummy)) {
 		m_p_socket_stats->counters.n_tx_dummy++;
 	} else if (total_tx) {
@@ -894,7 +897,7 @@ err_t sockinfo_tcp::ip_output(struct pbuf *p, void* v_p_conn, int is_rexmit, uin
 			return ERR_OK;
 		}
 	}
-
+	
 	if (likely((p_dst->is_valid()))) {
 		p_dst->fast_send(p_iovec, count, is_dummy, false, is_rexmit);
 	} else {
@@ -4307,12 +4310,12 @@ void sockinfo_tcp::tcp_tx_pbuf_free(void* p_conn, struct pbuf *p_buff)
 		mem_buf_desc_t * p_desc = (mem_buf_desc_t *)p_buff;
 
 		//potential race, ref is protected here by tcp lock, and in ring by ring_tx lock
-		if (likely(p_desc->lwip_pbuf.pbuf.ref))
-			p_desc->lwip_pbuf.pbuf.ref--;
+		if (likely(p_desc->lwip_pbuf_get_ref_count()))
+			p_desc->lwip_pbuf_dec_ref_count();
 		else
 			__log_err("ref count of %p is already zero, double free??", p_desc);
 
-		if (p_desc->lwip_pbuf.pbuf.ref == 0) {
+		if (p_desc->lwip_pbuf_get_ref_count() == 0) {
 			p_desc->p_next_desc = NULL;
 			g_buffer_pool_tx->put_buffers_thread_safe(p_desc);
 		}

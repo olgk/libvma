@@ -103,7 +103,6 @@ inline ssize_t dst_entry_udp::fast_send_not_fragmented(const iovec* p_iov, const
 	p_mem_buf_desc->p_next_desc = NULL;
 
 	set_tx_buff_list_pending(false);
-
 	// Check if inline is possible
 	if (sz_iov == 1 && (sz_data_payload + m_header.m_total_hdr_len) < m_max_inline) {
 		m_p_send_wqe = &m_inline_send_wqe;
@@ -116,6 +115,8 @@ inline ssize_t dst_entry_udp::fast_send_not_fragmented(const iovec* p_iov, const
 		m_sge[1].length = p_iov[0].iov_len;
 		m_sge[1].addr = (uintptr_t)p_iov[0].iov_base;
 	} else {
+//printf("sz_iov: %d sz_data_payload: %d total_hdr_len: %d m_max_inline: %d\n", (int)sz_iov, (int)sz_data_payload, 
+//	(int)m_header.m_total_hdr_len, (int)m_max_inline);
 		m_p_send_wqe = &m_not_inline_send_wqe;
 
 		tx_packet_template_t *p_pkt = (tx_packet_template_t*)p_mem_buf_desc->p_buffer;

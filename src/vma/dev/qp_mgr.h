@@ -53,7 +53,6 @@
 
 #ifdef HAVE_INFINIBAND_MLX5_HW_H
 #include <infiniband/mlx5_hw.h>
-#include "vma/hw/mlx5/wqe.h" //!TODO: remove when enable VMAPOLL in *mlx5
 #endif // HAVE_INFINIBAND_MLX5_HW_H
 
 class buffer_pool;

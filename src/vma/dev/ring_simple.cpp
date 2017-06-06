@@ -1526,6 +1526,9 @@ int ring_simple::get_max_tx_inline()
 /* note that this function is inline, so keep it above the functions using it */
 inline int ring_simple::send_buffer(vma_ibv_send_wr* p_send_wqe, bool b_block)
 {
+	//Note: this is debatable logic as it count of WQEs waiting completion but
+	//our SQ is cyclic buffer so in reality only last WQE is still being sent
+	//and other SQ is mostly free to work on.
 	int ret = 0;
 	if (likely(m_tx_num_wr_free > 0)) {
 		ret = m_p_qp_mgr->send(p_send_wqe);
@@ -1780,7 +1783,7 @@ mem_buf_desc_t* ring_simple::get_tx_buffers(uint32_t n_num_mem_bufs)
 //call under m_lock_ring_tx lock
 int ring_simple::put_tx_buffers(mem_buf_desc_t* buff_list)
 {
-	int count = 0;
+	int count = 0,freed=0;
 	mem_buf_desc_t *next;
 
 	while (buff_list) {
@@ -1796,10 +1799,12 @@ int ring_simple::put_tx_buffers(mem_buf_desc_t* buff_list)
 		if (buff_list->lwip_pbuf.pbuf.ref == 0) {
 			free_lwip_pbuf(&buff_list->lwip_pbuf);
 			m_tx_pool.push_back(buff_list);
+			freed++;
 		}
 		count++;
 		buff_list = next;
 	}
+	ring_logfunc("buf_list: %p count: %d freed: %d\n", buff_list, count, freed);
 
 	if (unlikely(m_tx_pool.size() > (m_tx_num_bufs / 2) &&  m_tx_num_bufs >= RING_TX_BUFS_COMPENSATE * 2)) {
 		int return_to_global_pool = m_tx_pool.size() / 2;

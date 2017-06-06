@@ -65,7 +65,7 @@ public:
 			return NULL;
 		while (index++ <= m_num_sge) {
 
-			if (pos+m_sg[index].length > ind_) {
+			if (pos+(int)m_sg[index].length > ind_) {
 				return (uint8_t*)m_sg[index].addr+(ind_-pos);
 			} else {
 				pos += m_sg[index].length;
@@ -79,15 +79,16 @@ public:
 //of next SGE
 	inline uint8_t* get_data(int* get_len)
 	{
-		if (likely(m_sg != NULL && m_index < m_num_sge)) {
+		if (likely(m_index < m_num_sge)) {
 
 			m_current = m_sg + m_index;
 
 			if (likely((m_pos+*get_len) < (int)m_current->length)) {
+				uint8_t* old_p = (uint8_t*)m_sg[m_index].addr+m_pos;
 				m_pos += *get_len;
 				if (unlikely(m_pos < 0))
 					return NULL;
-				return (uint8_t*)m_current->addr;
+				return old_p;
 			} else {
 				*get_len = m_current->length - m_pos;
 
@@ -104,6 +105,7 @@ public:
 
 	inline int get_num_sge(void) { return m_sg ? m_num_sge : -1; }
 	inline int length(void) { return m_length; }
+	inline int get_current_lkey(void) { return m_current->lkey; }
 
 private:
 	struct ibv_sge*	m_sg;

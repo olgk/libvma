@@ -485,6 +485,7 @@ mem_buf_desc_t* cq_mgr::process_cq_element_tx(vma_ibv_wc* p_wce)
 	mem_buf_desc_t* p_mem_buf_desc = (mem_buf_desc_t*)(uintptr_t)p_wce->wr_id;
 
 	if (unlikely(p_wce->status != IBV_WC_SUCCESS)) {
+//		cq_loginfo("wce error status '%s' [%d] (wr_id=%p, qp_num=%x)", priv_ibv_wc_status_str(p_wce->status), p_wce->status, p_wce->wr_id, p_wce->qp_num);
 		process_cq_element_log_helper(p_mem_buf_desc, p_wce);
 
 		if (p_mem_buf_desc == NULL) {
