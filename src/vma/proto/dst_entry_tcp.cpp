@@ -104,6 +104,7 @@ ssize_t dst_entry_tcp::fast_send(const iovec* p_iov, const ssize_t sz_iov, bool 
 			m_p_send_wqe = &m_inline_send_wqe;
 		} else {
 			m_p_send_wqe = &m_not_inline_send_wqe;
+			vma_send_wr_opcode(*m_p_send_wqe) = VMA_IBV_WR_SEND_TSO;
 		}
 
 		m_p_send_wqe->wr_id = (uintptr_t)p_tcp_iov[0].p_desc;

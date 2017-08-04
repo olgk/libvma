@@ -50,6 +50,8 @@
 #define qp_logfunc	__log_info_func
 #define qp_logfuncall	__log_info_funcall
 
+//#define DBG_DUMP_WQE 1
+
 #ifdef DBG_DUMP_WQE
 #define dbg_dump_wqe(addr, size) { \
 	uint32_t* wqe = addr; \
@@ -304,25 +306,26 @@ inline int qp_mgr_eth_mlx5::fill_wqe(vma_ibv_send_wr *pswr)
 	// control segment is mostly filled by preset after previous packet
 	// we always inline ETH header
 	sg_array sga(pswr->sg_list, pswr->num_sge);
-	int      inline_len = MLX5_ETH_INLINE_HEADER_SIZE;
-	int      data_len   = sga.length()-inline_len;
-	int      max_inline_len = m_max_inline_data;
-	int      wqe_size = sizeof(struct mlx5_wqe_ctrl_seg)/OCTOWORD + sizeof(struct mlx5_wqe_eth_seg)/OCTOWORD;
-
 	uint8_t* cur_seg = (uint8_t*)m_sq_wqe_hot+sizeof(struct mlx5_wqe_ctrl_seg);
-	uint8_t* data_addr = sga.get_data(&inline_len); // data for inlining in ETH header
-
-	qp_logfunc("wqe_hot:%p num_sge: %d data_addr: %p data_len: %d max_inline_len: %d inline_len$ %d",
-		m_sq_wqe_hot, pswr->num_sge, data_addr, data_len, max_inline_len, inline_len);
-
-	// Fill Ethernet segment with header inline, static data
-	// were populated in preset after previous packet send
-	memcpy(cur_seg+offsetof(struct mlx5_wqe_eth_seg, inline_hdr_start), data_addr, MLX5_ETH_INLINE_HEADER_SIZE);
-	data_addr  += MLX5_ETH_INLINE_HEADER_SIZE;
-	cur_seg += sizeof(struct mlx5_wqe_eth_seg);
+	int      inline_len = MLX5_ETH_INLINE_HEADER_SIZE;
+	int      data_len   = sga.length();
+	int      wqe_size = sizeof(struct mlx5_wqe_ctrl_seg)/OCTOWORD;
+	int	 max_inline_len = m_max_inline_data;
 
 	// assume packet is full inline
 	if (likely(data_len <= max_inline_len)) {
+		uint8_t* data_addr = sga.get_data(&inline_len); // data for inlining in ETH header
+		data_len -= inline_len;
+		qp_logfunc("wqe_hot:%p num_sge: %d data_addr: %p data_len: %d max_inline_len: %d inline_len$ %d",
+			m_sq_wqe_hot, pswr->num_sge, data_addr, data_len, max_inline_len, inline_len);
+
+		// Fill Ethernet segment with header inline, static data
+		// were populated in preset after previous packet send
+		memcpy(cur_seg+offsetof(struct mlx5_wqe_eth_seg, inline_hdr_start), data_addr, MLX5_ETH_INLINE_HEADER_SIZE);
+		data_addr  += MLX5_ETH_INLINE_HEADER_SIZE;
+		cur_seg += sizeof(struct mlx5_wqe_eth_seg);
+		wqe_size += sizeof(struct mlx5_wqe_eth_seg)/OCTOWORD;
+
 		max_inline_len = data_len;
 		// Filling inline data segment
 		// size of BlueFlame buffer is 4*WQEBBs, 3*OCTOWORDS of the first
@@ -397,15 +400,57 @@ inline int qp_mgr_eth_mlx5::fill_wqe(vma_ibv_send_wr *pswr)
 		// data is bigger than max to inline we inlined only ETH header + uint from IP (18 bytes)
 		// the rest will be in data pointer segment
 		// adding data seg with pointer if there still data to transfer
-		inline_len = fill_ptr_segment(sga, (struct mlx5_wqe_data_seg*)cur_seg, data_addr, data_len);
-		wqe_size  += inline_len/OCTOWORD;
-		qp_logfunc("data_addr: %p data_len: %d rest_space: %d wqe_size: %d",
-			data_addr, data_len, inline_len, wqe_size);
-		// configuring control
-		m_sq_wqe_hot->ctrl.data[1] = htonl((m_qp_num << 8) | wqe_size);
-		inline_len = align_to_WQEBB_up(wqe_size)/4;
-		send_by_bf((uint64_t*)m_sq_wqe_hot, inline_len);
-		dbg_dump_wqe((uint32_t *)m_sq_wqe_hot, wqe_size*16);
+		if (vma_send_wr_opcode(*pswr) == VMA_IBV_WR_SEND ) {
+			uint8_t* data_addr = sga.get_data(&inline_len); // data for inlining in ETH header
+
+			qp_logfunc("wqe_hot:%p num_sge: %d data_addr: %p data_len: %d max_inline_len: %d inline_len$ %d",
+				m_sq_wqe_hot, pswr->num_sge, data_addr, data_len, max_inline_len, inline_len);
+
+			// Fill Ethernet segment with header inline, static data
+			// were populated in preset after previous packet send
+			memcpy(cur_seg+offsetof(struct mlx5_wqe_eth_seg, inline_hdr_start), data_addr, MLX5_ETH_INLINE_HEADER_SIZE);
+			data_addr  += MLX5_ETH_INLINE_HEADER_SIZE;
+			cur_seg += sizeof(struct mlx5_wqe_eth_seg);
+			wqe_size += sizeof(struct mlx5_wqe_eth_seg)/OCTOWORD;
+			inline_len = fill_ptr_segment(sga, (struct mlx5_wqe_data_seg*)cur_seg, data_addr, data_len);
+			wqe_size  += inline_len/OCTOWORD;
+			qp_logfunc("data_addr: %p data_len: %d rest_space: %d wqe_size: %d",
+				data_addr, data_len, inline_len, wqe_size);
+			// configuring control
+			m_sq_wqe_hot->ctrl.data[1] = htonl((m_qp_num << 8) | wqe_size);
+			inline_len = align_to_WQEBB_up(wqe_size)/4;
+			send_by_bf((uint64_t*)m_sq_wqe_hot, inline_len);
+			dbg_dump_wqe((uint32_t *)m_sq_wqe_hot, wqe_size*16);
+		} else {
+			// We supporting also VMA_IBV_WR_SEND_TSO, this is the case
+			inline_len = 14+20+20;
+			struct mlx5_wqe_eth_seg* eth_seg = (struct mlx5_wqe_eth_seg*)((uint8_t*)m_sq_wqe_hot+sizeof(struct mlx5_wqe_ctrl_seg));
+			eth_seg->mss = htons(1514-inline_len);
+			uint8_t* data_addr = sga.get_data(&inline_len); // data for inlining in ETH header
+			eth_seg->inline_hdr_sz = htons(inline_len);
+
+			qp_logfunc("TSO: wqe_hot:%p num_sge: %d data_addr: %p data_len: %d max_inline_len: %d inline_len$ %d",
+				m_sq_wqe_hot, pswr->num_sge, data_addr, data_len, max_inline_len, inline_len);
+
+			// Fill Ethernet segment with header inline, static data
+			// were populated in preset after previous packet send
+			memcpy(cur_seg+offsetof(struct mlx5_wqe_eth_seg, inline_hdr_start), data_addr, inline_len);
+			data_addr += inline_len;
+			data_len  -= inline_len;
+			max_inline_len = align_to_octoword_up(sizeof(struct mlx5_wqe_eth_seg)+inline_len-MLX5_ETH_INLINE_HEADER_SIZE);
+			cur_seg += max_inline_len;
+			wqe_size += max_inline_len/OCTOWORD;
+			inline_len = fill_ptr_segment(sga, (struct mlx5_wqe_data_seg*)cur_seg, data_addr, data_len);
+			wqe_size  += inline_len/OCTOWORD;
+			qp_logfunc("data_addr: %p data_len: %d inline_len: %d aligned: %d wqe_size: %d",
+				data_addr, data_len, inline_len, max_inline_len, wqe_size);
+			// configuring control
+			m_sq_wqe_hot->ctrl.data[0] = htonl((m_sq_wqe_counter << 8) | MLX5_OPCODE_TSO);
+			m_sq_wqe_hot->ctrl.data[1] = htonl((m_qp_num << 8) | wqe_size);
+			inline_len = align_to_WQEBB_up(wqe_size)/4;
+			send_by_bf((uint64_t*)m_sq_wqe_hot, inline_len);
+			dbg_dump_wqe((uint32_t *)m_sq_wqe_hot, wqe_size*16);
+		}
 	}
 	return 1;
 }
